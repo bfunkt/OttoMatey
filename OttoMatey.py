@@ -8,10 +8,11 @@
 import sys
 from PyQt5 import QtCore, QtGui, QtWidgets
 from OttoMatey_GUI_modified import Ui_MainWindow
-from pprint import pprint
-import tables
 
 
+
+MACROHANDLEBASE = 10000
+MAXMACROS       = 50
 
 class Convert:
     def __init__(self):
@@ -108,26 +109,15 @@ class Listener:
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self):
-        QtWidgets.QWidget.__init__(self)
+    def __init__(self, parent=None):
+        QtWidgets.QWidget.__init__(self, parent)
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
         self.ui.retranslateUi(self)
 
-        self.ui.insertTextEvent = self
 
 
 
-        #self.workspacedata contains all data shown in the workspace tree. 
-        #used for storing/modifying data without needing to operate on the QTreeWidget and QTreeWidgetItem objects
-        self.workspacedata = {}
-
-        #self.loadedkeys tracks the topLevelItems by macrotype  e.g.  {'10000', QTreeWidgetItem at x000ec601}
-        self.loadedkeys = {}
-
-
-#####################################################################################################
-#####################################################################################################
         #event signals      
 
         self.ui.insertBreaksGo.clicked.connect(self.mInsertBreaksGo)
@@ -168,44 +158,211 @@ class MainWindow(QtWidgets.QMainWindow):
 #####################################################################################################
 #####################################################################################################
 
+    
+    def setChildIndicatorPolicy(self, reference):
+        reference.setChildIndicatorPolicy(QtWidgets.QTreeWidgetItem.DontShowIndicatorWhenChildless)
 
-        
-    def setWorkspaceItems(self, data):
-        datakeys = data.keys()
-        
-        #keys of new dict pairs being sent in data
-        for macrotype in datakeys: 
-            if macrotype not in self.workspacedata:
-                self.ui.workspaceTree.addTopLevelItem(QtWidgets.QTreeWidgetItem([data[macrotype][0]], int(macrotype)))
-            
-            self.workspacedata[macrotype] = data[macrotype]
-
-        #keys of all TopLevel entries in the tree
+    def searchTopLevelItems(self):
         for i in range(0, self.ui.workspaceTree.topLevelItemCount()):
-            k = str(self.ui.workspaceTree.topLevelItem(i).type())
-            v = self.ui.workspaceTree.topLevelItem(i)
-            v.setChildIndicatorPolicy(QtWidgets.QTreeWidgetItem.DontShowIndicatorWhenChildless)
-            self.loadedkeys[k] = v
+            handle  = self.ui.workspaceTree.topLevelItem(i).type()
+            ref     = self.ui.workspaceTree.topLevelItem(i)
+            wrk.setObjectReference(handle, i, ref)
 
-        for macrotype in datakeys:
-            self.loadedkeys[macrotype].takeChildren()
-            for child in data[macrotype][1:]:
-                temptype = list(child.keys())[0]
-                tempname = child[temptype]
-                self.loadedkeys[macrotype].addChild(QtWidgets.QTreeWidgetItem(self.loadedkeys[macrotype], [tempname], int(temptype)))
-
-    def setMacroItems(self, data, macro):
-        self.loadedkeys[macro].takeChildren()
-        self.workspacedata[macro] = data
-
-        for child in data[1:]:
-            temptype = list(child.keys())[0]
-            tempname = child[temptype]
-            print("temptype = ", temptype)
-            print("tempname = ", tempname)
-            self.loadedkeys[macro].addChild(QtWidgets.QTreeWidgetItem(self.loadedkeys[macro], [tempname], int(temptype)))
+    def searchChildItems(self, parentobjectreference):
+        children = parentobjectreference.children()
+        for ref in children:
+            handle  = ref.type()
+            index   = ref.indexOfChild()
+            wrk.setObjectReference(handle, index, ref)
 
 
+    #the presence of a parenthandle determines if the  is parent or child
+    def addUiItem(self, handle, parentobjectreference, index, name): 
+        #add a top level 
+        if handle % MACROHANDLEBASE == 0:
+            parent = self.ui.workspaceTree.insertTopLevelItem(index, QtWidgets.QTreeWidgetItem([name], handle))
+
+            self.searchTopLevelItems()
+
+        #add a child 
+        else:
+            parentobjectreference.insertChild(index, parent([name], handle))
+
+            self.searchChildItems(parentobjectreference)
+
+    def removeUiItem(self, index, parentobjectreference):
+        if parentobjectreference is None:
+            self.ui.workspaceTree.takeTopLevelItem(index)
+
+        else:
+            parentobjectreference.takeChild(index)
+
+    def getCurrentIndex(self):
+        return(self.ui.workspaceTree.currentItem())
+
+
+#####################################################################################################
+#####################################################################################################
+class Data:
+    def __init__(self, importdata=None):
+        self.sessdata   = {}        #all widget data, hashed by handle
+        self.sessmacros = []        #list of all the top level handles e.g. '10000', '30000', etc
+        if importdata is not None:
+            self.importdata = importdata
+            #populate data to self.sessdata
+        else:
+            pass
+
+    def initFirstTreeObject(self):
+        self.addItem(10000, 0, 'myMacro', None)
+
+
+    def returnParentHandle(self, handle):
+        handle -= handle % MACROHANDLEBASE
+        return(handle)
+
+    def addUiItem(self, parenthandle, parentobjectreference, index, name):
+        win.addUiItem(parenthandle, parentobjectreference, index, name)
+
+    def removeUiItem(self, parentobjectreference):
+        win.removeUiItem(parentobjectreference)
+
+        #returns the list of events in a specified macro
+    def getMacroList(self, handle):
+        d       = []
+        count   = 0
+
+        for k, v in self.sessdata.items():
+            if v[2] == handle:
+                d.append([k, v[2]])
+
+        d = sorted(d, key=lambda col: col[1])
+
+        return(d)
+
+    def organizeMacro(self, handle):
+        d = self.getMacroList(handle)
+        for i in range(0, len(d)):
+            self.sessdata[d[i][0]] = i
+
+        return(d)
+
+    def organizeData(self, macro=None):
+            if macro == None:
+                for handle in self.sessmacros:
+                    self.organizeMacro(handle)
+            else:
+                for i in macro:
+                    i = i - (i % MACROHANDLEBASE) #find the top level handle
+                    self.organizeMacro(i)
+
+    def addItem(self, handle=None, index=None, name=None, parenthandle=None, reference=QtWidgets.QTreeWidgetItem):
+        self.sessdata[handle]   = [     index,              #0
+                                        name,               #1
+                                        parenthandle,       #2
+                                        reference]          #3
+
+        self.organizeData([handle])
+        self.addUiItem(handle, self.sessdata[handle][3], self.sessdata[handle][0], self.sessdata[handle][1])
+
+
+    def removeItem(self, handles):
+        deletedset = ()
+        for handle in handles:
+            if handle in self.sessdata:
+                if self.returnParentHandle(handle) in sessmacros:
+                    deletedset.add(self.returnParentHandle(handle))
+                else:
+                    deletedset.add(handle)
+                self.removeUiItem(self.sessdata[handle][3]) #send the handle and the object reference to remove UI s
+                del self.sessdata[handle]
+        self.organizeData(deletedset)
+
+    def setObjectReference(self, handle, index, reference):
+        self.sessdata[handle][0] = index
+        self.sessdata[handle][3] = reference
+        win.setChildIndicatorPolicy(reference)
+
+
+    def findNextHandle(self, handle):
+        #if searching for a macro handle / top level  (multiples of 10000)
+        if int(handle % MACROHANDLEBASE) == 0:
+            i = 0
+            while i < MAXMACROS:
+                i += 1
+                j = i * MACROHANDLEBASE
+                if j in self.sessmacros:
+                    pass
+                else:
+                    return(j)
+            return(0)
+
+        #if searching for a child handle
+        else:
+            handle -= handle % MACROHANDLEBASE
+            while i < MACROHANDLEBASE:
+                i += 1
+                j = handle + i
+                if j in self.sessdata:
+                    pass
+                else:
+                    return(j)
+            return(0)
+          
+
+    def insert(self, handle, data, methodtype):
+        if handle is None or handle not in self.sessdata:
+            for i in range(1, MAXMACROS):
+                i *= MACROHANDLEBASE
+                if i in self.macrodata:
+                    handle = i
+
+        if methodtype == "noAdvFunction":
+            self.addItem(self.findNextHandle(handle), win.getCurrentIndex(), data, self.returnParentHandle(handle))
+
+        elif methodtype == "afterEveryStep":
+            i = 1
+            for item in self.getMacroList(self.returnParentHandle(handle)):
+                self.addItem(self.findNextHandle(handle), (i * 2 - 1), data, self.returnParentHandle(handle))
+                i += 1
+
+        elif methodtype == "afterMouseClicks":
+            tempstring = ".Click"
+            k = 1
+            for item in self.getMacroList(self.returnParentHandle(handle)):
+                if tempstring.lower() in self.sessdata[item][2].lower:
+                    k += 1
+                    self.addItem(findNextHandle(handle), k, data, self.returnParentHandle(handle))
+                k += 1
+
+        elif methodtype == "afterKeystrokes":
+            tempstring = "Keystrokes"
+            k = 1
+            for item in self.getMacroList(self.returnParentHandle(handle)):
+                if tempstring.lower() in self.sessdata[item][2].lower:
+                    k += 1
+                    self.addItem(self.findNextHandle(handle), k, data, self.returnParentHandle(handle))
+                k += 1
+
+        elif methodtype == "textInsert":
+            self.addItem(self.findNextHandle(handle), win.getCurrentIndex(), data, self.returnParentHandle(handle))
+        else:
+            print("error calling Workspace.insert - '{0}' not found", methodtype)
+
+        self.organizeMacro(self.returnParentHandle(handle))
+
+
+
+    # #copy/paste in the Macro class deals with data in the active macro list                
+    # def copy(self, markerstart, markerend):
+    #     c.add(self.macrodata[markerstart:markerend])
+        
+    # def paste(self, markerstart, markerend):
+    #     self.insert(markerstart, markerend, c.getactiveclip)
+
+
+#####################################################################################################
+#####################################################################################################
 
 #####################################################################################################
 #####################################################################################################
@@ -215,114 +372,17 @@ clipboard   = Clipboard()
 converter   = Convert()
 listener    = Listener()
 
+
+wrk = Data()
+
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     win = MainWindow()
     win.show()
 
 
+wrk.initFirstTreeObject()
 
-#####################################################################################################
-#####################################################################################################
-
-
-class Workspace:
-    def __init__(self, macrodata={"10000": ["myMacro", {"10001": "Break 1.50s"}]}):
-        self.macrodata = macrodata
-        self.workspaceupdate()
-
-    def workspaceupdate(self):
-        win.setWorkspaceItems(self.macrodata)
-
-    def macroupdate(self, data):
-        win.setMacroItems(self.macrodata[data], data)
-
-    def findnexttype(self, macro):
-        temptype = int(macro) + 1
-        s = self.macrodata[macro]
-        for s in self.macrodata[macro]:
-            print(s)
-            print(str(temptype))
-            if str(temptype) in self.macrodata[macro]:
-                temptype += 1
-
-            else:
-                return(str(temptype))
-
-    def insert(self, temptype, editdata, methodtype):
-        #use the 5 digit temptype to determine the macro and position to insert the event into
-        tempmacro = str((temptype / 10000) * 10000)
-        try:
-            tempindex = self.macrodata[str(tempmacro)].index(str(temptype))
-        except:
-            tempmacro = str(10000)
-            tempindex = 1
-
-        if methodtype == "noAdvFunction":
-            self.macrodata[tempmacro].insert(tempindex, {self.findnexttype(tempmacro):editdata})
-
-        elif methodtype == "afterEveryStep":
-            for ins in range(1, len(self.macrodata[tempmacro])):
-                self.macrodata[tempmacro].insert((ins * 2), {self.findnexttype(tempmacro):editdata})
-
-        elif methodtype == "afterMouseClicks":
-            tempstring = ".click"
-            k = 0
-            for ins in range(1, len(self.macrodata[tempmacro])):
-                if tempstring.lower() in self.macrodata[tempmacro][ins + k].lower:
-                    self.macrodata[tempmacro].insert((ins + k), {self.findnexttype(tempmacro):editdata})
-                    k += 1
-
-        elif methodtype == "afterKeystrokes":
-            tempstring = "keystroke"
-            k = 0
-            for ins in range(1, len(self.macrodata[tempmacro])):
-                if tempstring.lower() in self.macrodata[tempmacro][ins + k].lower:
-                    self.macrodata[tempmacro].insert((ins + k), {self.findnexttype(tempmacro):editdata})
-                    k += 1      
-
-        elif methodtype == "textInsert":
-            self.macrodata[tempmacro].insert(tempindex, {self.findnexttype(tempmacro):editdata})
-
-        else:
-            print("error calling Workspace.insert - '{0}' not found", methodtype)
-
-
-        print("self.macrodata = ", self.macrodata[tempmacro])
-
-        self.macroupdate(tempmacro)
-
-
-
-
-
-    def delete(self, temptype):
-        tempmacro = (temptype / 10000) * 10000
-        try:
-            tempindex = self.macrodata[str(tempmacro)].index(str(temptype))
-        except:
-            tempmacro = str(10000)
-            tempindex = 1
-        
-        self.macrodata[tempmacro].pop(tempindex)
-        self.macroupdate[tempmacro]
-
-    #copy/paste in the Macro class deals with data in the active macro list                
-    def copy(self, markerstart, markerend):
-        c.add(self.macrodata[markerstart:markerend])
-        
-    def paste(self, markerstart, markerend):
-        self.insert(markerstart, markerend, c.getactiveclip)
-
-
-#####################################################################################################
-#####################################################################################################
-
-
-
-
-
-wrk = Workspace()
 
            
 
