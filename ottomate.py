@@ -7,7 +7,7 @@
 
 import sys
 from PyQt5 import QtCore, QtGui, QtWidgets
-from OttoMatey_GUI_modified import Ui_MainWindow
+from ottomate_gui_modified import Ui_MainWindow
 
 
 
